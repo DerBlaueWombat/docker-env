@@ -1,0 +1,94 @@
+version: '3'
+services:
+  wiki:
+    image: mediawiki
+    depends_on: 
+      - database
+    restart: always
+    expose:
+      - "8080"
+    links:
+      - database
+    volumes:
+      - ./project/wiki/site:/var/www/html/images
+      # After initial setup, download LocalSettings.php to the same directory as
+      # this yaml and uncomment the following line and use compose to restart
+      # the mediawiki service
+      - ./project/wiki/LocalSettings.php:/var/www/html/LocalSettings.php
+
+  database:
+    image: mysql:5.7
+    volumes: 
+      - ./project/wiki/db:/var/lib/mysql
+    restart: always
+    environment:
+      # @see https://phabricator.wikimedia.org/source/mediawiki/browse/master/includes/DefaultSettings.php
+      MYSQL_DATABASE: my_wiki
+      MYSQL_USER: wikiuser
+      MYSQL_PASSWORD: example
+      MYSQL_ROOT_PASSWORD: example
+
+  db_wp:
+    image: mysql:5.7
+    volumes:
+      - ./project/homepage/db:/var/lib/mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: example
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: example
+    ports:
+      - "3307:3306"
+
+  wordpress:
+    depends_on:
+      - db_wp
+    image: wordpress
+    restart: always
+    expose:
+      - "80"
+    links:
+      - "db_wp:db_wp"
+      - "redis:redis"
+    environment:
+      WORDPRESS_DB_HOST: db_wp:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: example
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - ./project/homepage/wordpress:/var/www/html
+
+  nginx:
+    image: nginx
+    container_name: nginx
+    restart: always
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+    links:
+      - wiki
+      - wordpress
+    volumes:
+      - ./project/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./project/nginx/error.log:/etc/nginx/error_log.log
+      - ./project/nginx/cache:/etc/nginx/cache
+      - ./project/nginx/certbot/conf:/etc/letsencrypt
+      - ./project/nginx/certbot/www:/var/www/certbot
+    ports:
+      - 80:80
+      - 443:443
+      - 8080:8080
+
+  certbot:
+    image: certbot/certbot
+    restart: always    
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    volumes:
+      - ./project/nginx/certbot/conf:/etc/letsencrypt
+      - ./project/nginx/certbot/www:/var/www/certbot
+
+  redis:
+    image: redis
+    restart: always
+    volumes: 
+      - ./project/homepage/redis:/data
+
